@@ -1,0 +1,256 @@
+---
+title: "Analyzing Relationship Between Web Activity and Voting using R "
+author: "Luke Smith - lasmit17
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(knitr)
+library(sjPlot)
+library(haven)
+library(broom)
+library(stats)
+library(kableExtra)
+library(leaflet)
+library(htmltools)
+library(rgdal)
+library(sf)
+library(scales)
+library(glue)
+library(geojson)
+library(ggmap)
+```
+
+
+```{r}
+#Creating the initial datasets
+web_df <- readRDS("tracking/meof_usa_web_df.RDS")
+survey_df <- readRDS("survey/meof_usa_survey_df.RDS")
+survey_df_w4 <- filter(survey_df, wave == 4)
+time_zones_df <- readRDS("time_zones.RDS")
+
+```
+
+```{r}
+
+#Creating an initial data set that finds participants who visited Facebook
+facebook_web_df <- web_df %>%
+  filter(str_detect(domain, "facebook.com")) %>%
+  group_by(personid, duration) %>%
+  summarize(facebook_visits = n()) %>%
+  mutate(facebook_visits = facebook_visits)
+
+
+collapsed_df <- facebook_web_df %>%
+  group_by(personid) %>%
+  summarize(mean_duration_fb = mean(duration),
+            facebook_visits = n())
+
+
+joined_facebook_df <- left_join(collapsed_df, survey_df, by = "personid")
+filtered_facebook_df <- joined_facebook_df %>%
+                        select(personid,
+                               facebook_visits,
+                               mean_duration_fb,
+                               wave,
+                               gender,
+                               birthyr,
+                               race,
+                               educ,
+                               marstat,
+                               child18,
+                               employ,
+                               faminc_new,
+                               inputstate,
+                               religpew,
+                               pew_churatd,
+                               pew_religimp,
+                               pew_prayer,
+                               ideo5,
+                               votereg,
+                               presvote16post,
+                               followspol,
+                               fbusage_check,
+                               fbusage_post,
+                               fbpoluse_express,
+                               fbpoluse_share,
+                               fbpoluse_readnews,
+                               fbpoluse_receive,
+                               fbpoluse_readopinion,
+                               fbpoluse_like,
+                               fbpoluse_talk) %>%
+                         filter(wave == 4)
+
+
+#Creating threshold for top 50% for Facebook
+threshold_50_fb <- quantile(filtered_facebook_df$facebook_visits, 0.5)
+filtered_facebook_df_50 <- subset(filtered_facebook_df, facebook_visits > threshold_50_fb)
+
+#Creating threshold for top 10% Facebook
+threshold_10_fb <- quantile(filtered_facebook_df$facebook_visits, 0.1)
+filtered_facebook_df_10 <- subset(filtered_facebook_df, facebook_visits > threshold_10_fb)
+
+#Linear model for all Facebook visitors
+model_all_fb_users <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, fbusage_check,fbusage_post,fbpoluse_express, fbpoluse_share, fbpoluse_readnews, fbpoluse_receive, fbpoluse_readopinion, fbpoluse_like, fbpoluse_talk) ~ facebook_visits, data = filtered_facebook_df)
+
+
+#Linear model for top 50% of Facebook visitors
+model_all_fb_users_top_50 <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, fbusage_check,fbusage_post,fbpoluse_express, fbpoluse_share, fbpoluse_readnews, fbpoluse_receive, fbpoluse_readopinion, fbpoluse_like, fbpoluse_talk) ~ facebook_visits, data = filtered_facebook_df_50)
+
+#Linear model for top 10% of Facebook visitors
+model_all_fb_users_top_10 <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, fbusage_check,fbusage_post,fbpoluse_express, fbpoluse_share, fbpoluse_readnews, fbpoluse_receive, fbpoluse_readopinion, fbpoluse_like, fbpoluse_talk) ~ facebook_visits, data = filtered_facebook_df_10)
+
+
+
+#Testing theory from that paper - verified for expressing political opinion: statistically significant
+model_fb_share_ideo_express <- lm(ideo5 ~ fbpoluse_express, data = filtered_facebook_df)
+model_fb_share_ideo_talk <- lm(ideo5 ~ fbpoluse_talk, data = filtered_facebook_df)
+
+```
+
+```{r}
+
+#Now let's look at mean Facebook visit duration for the same thresholds
+
+#All visitors
+model_all_fb_users_dur <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, fbusage_check,fbusage_post,fbpoluse_express, fbpoluse_share, fbpoluse_readnews, fbpoluse_receive, fbpoluse_readopinion, fbpoluse_like, fbpoluse_talk) ~ mean_duration_fb, data = filtered_facebook_df)
+
+#Top 50% visitors
+model_all_fb_users_top_50_dur <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, fbusage_check,fbusage_post,fbpoluse_express, fbpoluse_share, fbpoluse_readnews, fbpoluse_receive, fbpoluse_readopinion, fbpoluse_like, fbpoluse_talk) ~ mean_duration_fb, data = filtered_facebook_df_50)
+
+
+#Top 10% visitors
+model_all_fb_users_top_10_dur <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, fbusage_check,fbusage_post,fbpoluse_express, fbpoluse_share, fbpoluse_readnews, fbpoluse_receive, fbpoluse_readopinion, fbpoluse_like, fbpoluse_talk) ~ mean_duration_fb, data = filtered_facebook_df_10)
+```
+
+
+```{r}
+
+##Recreating the above analysis using Twitter usage as well
+
+twitter_web_df <- web_df %>% 
+  filter(str_detect(domain, "twitter.com")) %>% 
+  group_by(personid, duration) %>%
+  summarize(twitter_visits = n()) %>%
+  mutate(twitter_visits = twitter_visits)
+
+
+collapsed_twitter_df <- twitter_web_df %>%
+  group_by(personid) %>%
+  summarize(mean_duration = mean(duration),
+            twitter_visits = n())
+
+
+
+joined_twitter_df <- inner_join(collapsed_twitter_df, survey_df, by = "personid")
+filtered_twitter_df <- joined_twitter_df %>%
+  select(personid,
+         twitter_visits,
+         mean_duration,
+         wave,
+         gender,
+         birthyr,
+         race,
+         educ,
+         marstat,
+         child18,
+         employ,
+         faminc_new,
+         inputstate,
+         religpew,
+         pew_churatd,
+         pew_religimp,
+         pew_prayer,
+         ideo5,
+         votereg,
+         presvote16post,
+         followspol,
+         twusage_check,
+         twusage_post,
+         twpoluse_express,
+         twpoluse_share,
+         twpoluse_readnews,
+         twpoluse_receive,
+         twpoluse_readopinion,
+         twpoluse_like,
+         twpoluse_talk) %>%
+  filter(wave == 4)
+
+
+#Creating threshold for top 50% for Twitter
+threshold_50_twitter <- quantile(joined_twitter_df$twitter_visits, 0.5)
+filtered_twitter_df_50 <- subset(joined_twitter_df, twitter_visits > threshold_50_twitter)
+
+#Creating threshold for top 10% Twitter
+threshold_10_twitter <- quantile(joined_twitter_df$twitter_visits, 0.1)
+filtered_twitter_df_10 <- subset(joined_twitter_df, twitter_visits > threshold_10_twitter)
+
+#Linear model for all Twitter visitors
+model_all_tw_users <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, twusage_check, twusage_post, twpoluse_express, twpoluse_share, twpoluse_readnews, twpoluse_receive, twpoluse_readopinion, twpoluse_like, twpoluse_talk) ~ twitter_visits, data = filtered_twitter_df)
+
+
+#Linear model for top 50% of Twitter visitors
+model_all_tw_users_top_50 <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, twusage_check, twusage_post, twpoluse_express, twpoluse_share, twpoluse_readnews, twpoluse_receive, twpoluse_readopinion, twpoluse_like, twpoluse_talk) ~ twitter_visits, data = filtered_twitter_df_50)
+                                
+#Linear model for top 10% of Twitter visitors
+model_all_tw_users_top_10 <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, twusage_check, twusage_post, twpoluse_express, twpoluse_share, twpoluse_readnews, twpoluse_receive, twpoluse_readopinion, twpoluse_like, twpoluse_talk) ~ twitter_visits, data = filtered_twitter_df_10)
+
+```
+
+```{r}
+
+#Now let's look at mean Twitter visit duration for the same thresholds
+
+#Linear model for all Twitter visitors
+model_all_tw_users_dur <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, twusage_check, twusage_post, twpoluse_express, twpoluse_share, twpoluse_readnews, twpoluse_receive, twpoluse_readopinion, twpoluse_like, twpoluse_talk) ~ mean_duration, data = filtered_twitter_df)
+
+
+#Linear model for top 50% of Twitter visitors
+model_all_tw_users_top_50_dur <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, twusage_check, twusage_post, twpoluse_express, twpoluse_share, twpoluse_readnews, twpoluse_receive, twpoluse_readopinion, twpoluse_like, twpoluse_talk) ~ mean_duration, data = filtered_twitter_df_50)
+
+#Linear model for top 10% of Twitter visitors
+model_all_tw_users_top_10_dur <- lm(cbind(gender, birthyr, race, educ, marstat, child18, faminc_new, inputstate, religpew, pew_churatd, pew_religimp, pew_prayer, ideo5, votereg, presvote16post, followspol, twusage_check, twusage_post, twpoluse_express, twpoluse_share, twpoluse_readnews, twpoluse_receive, twpoluse_readopinion, twpoluse_like, twpoluse_talk) ~ mean_duration, data = filtered_twitter_df_10)
+
+
+```
+
+```{r}
+#Creating plots for the Facebook and Twitter visit duration to accompany the written report
+ggplot(filtered_twitter_df,
+       aes(x = mean_duration,
+           y = educ)) +
+  geom_smooth(method="lm") +
+  geom_point() +
+  labs(title = "Linear Regression of Average Duration of Twitter Visits to Level of Education",
+       x = "Average Duration of Twitter Visits",
+       y = "Level of Education from 1-6 (No HS - Post-grad)") +
+  theme_bw() +
+  labs(caption = " Data source = MEOF")
+
+
+ggplot(filtered_facebook_df,
+       aes(x = mean_duration_fb,
+           y = educ)) +
+  geom_smooth(method="lm") +
+  geom_point() +
+  labs(title = "Linear Regression of Average Duration of Facebook Visits to Level of Education",
+       x = "Average Duration of Facebook Visits",
+       y = "Level of Education from 1-6 (No HS - Post-grad)") +
+  theme_bw() +
+  labs(caption = " Data source = MEOF")
+```
